@@ -1,0 +1,69 @@
+Const OPENAI_API_KEY As String = "YOUR_OPENAI_API_KEY"
+Const OPENAI_API_URL As String = "https://api.openai.com/v1/chat/completions"
+
+Function EscapeJsonString(str As String) As String
+    str = Replace(str, "\", "\\")
+    str = Replace(str, """", "\""")
+    str = Replace(str, vbCrLf, "\n")
+    str = Replace(str, vbLf, "\n")
+    str = Replace(str, vbCr, "\n")
+    EscapeJsonString = str
+End Function
+
+Sub ExtractKeywordsAndExplanation()
+    Dim http As Object
+    Dim jsonRequest As String, jsonResponse As String
+    Dim prompt As String, safePrompt As String
+    Dim ws As Worksheet
+    Dim lastRow As Long, i As Long
+    Dim inputText As String, keyword As String, explanation As String
+    Dim responseText As String
+
+    Set ws = ThisWorkbook.Sheets(1)
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    For i = 2 To lastRow
+        inputText = ws.Cells(i, "A").Value
+        If inputText <> "" Then
+            prompt = "以下の文章からキーワードを1つ抽出して、そのキーワードに関する簡単な解説（日本語、50文字以内）を返してください。" & vbCrLf & _
+                     "文章: " & inputText & vbCrLf & "出力形式: キーワード|解説"
+            safePrompt = EscapeJsonString(prompt)
+            jsonRequest = "{""model"": ""gpt-3.5-turbo"", ""messages"": [{""role"": ""user"", ""content"": """ & safePrompt & """}]}"
+
+            Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+            http.Open "POST", OPENAI_API_URL, False
+            http.setRequestHeader "Content-Type", "application/json"
+            http.setRequestHeader "Authorization", "Bearer " & OPENAI_API_KEY
+            http.Send jsonRequest
+
+            jsonResponse = http.responseText
+            responseText = ParseGPTResponse(jsonResponse)
+
+            If InStr(responseText, "|") > 0 Then
+                keyword = Split(responseText, "|")(0)
+                explanation = Split(responseText, "|")(1)
+                ws.Cells(i, "B").Value = Trim(keyword)
+                ws.Cells(i, "C").Value = Trim(explanation)
+            Else
+                ws.Cells(i, "B").Value = "取得失敗"
+                ws.Cells(i, "C").Value = responseText
+            End If
+        End If
+    Next i
+End Sub
+
+Function ParseGPTResponse(json As String) As String
+    Dim regex As Object
+    Set regex = CreateObject("VBScript.RegExp")
+    regex.Pattern = """content"":\s*""(.*?)"""
+    regex.Global = False
+    regex.IgnoreCase = True
+    regex.MultiLine = True
+
+    If regex.test(json) Then
+        ParseGPTResponse = regex.Execute(json)(0).SubMatches(0)
+        ParseGPTResponse = Replace(ParseGPTResponse, "\n", "")
+    Else
+        ParseGPTResponse = "API応答エラー"
+    End If
+End Function
